@@ -16,7 +16,7 @@ def custom_collate_fn(batch):
 
     return packed_batch
 
-def load_data(batch_size):
+def load_data(batch = False, batch_size = 64):
     folders = ["Training_Data_Master", "Validation_Data_Master"]
     sequences = []
     
@@ -27,20 +27,9 @@ def load_data(batch_size):
             file_path = os.path.join(folder_path, file)
             with open(file_path, 'r') as file:
                 traces = [int(value) for value in file.read().split()]
-                sequences.append(torch.tensor(traces, dtype=torch.float32))
+                sequences.append(torch.tensor(traces, dtype=torch.float32, requires_grad=True))
 
-    return DataLoader(sequences, batch_size = batch_size, shuffle = False, collate_fn=custom_collate_fn)
-
-
-def preprocess_data(batch_size):
-    return load_data(batch_size)
-
-class twoDListDataset(Dataset):
-    def __init__(self, list_of_lists):
-        self.list_of_lists = list_of_lists
-
-    def __len__(self):
-        return len(self.list_of_lists)
-
-    def __getitem__(self, idx):
-        return self.list_of_lists[idx]
+    if batch: 
+        return DataLoader(sequences, batch_size = batch_size, shuffle = False, collate_fn=custom_collate_fn)
+    else:
+        return sequences
