@@ -1,6 +1,6 @@
 from bcc import BPF
 import os
-from ctypes import c_uint64
+from datetime import datetime
 
 def get_path(name):
     relative_path = os.path.join(os.path.dirname(__file__), name)
@@ -715,14 +715,19 @@ int get_info_writev(struct pt_regs *ctx) {{
     }}
 """
 
+# Global variables
+requests = 0
+
 # Initialize BPF
 b = BPF(text=prog)
 
 # Define the output handler
 def print_event(cpu, data, size):
+    global requests
     event = b["syscall_events"].event(data)
     if (event.comm.decode() != "sshd"):
-        print(f"PID {event.pid}: Command: {event.syscall}")
+        requests += 1
+        print(f"PID {event.pid}: | System Call: {event.syscall} | Command:{event.comm.decode()}")
 
 with open(get_path("../data/final_syscalls.txt"), 'r') as file:
     syscalls = [value for value in file.read().split()]
@@ -735,7 +740,7 @@ for syscall_name in syscalls:
         b.attach_kprobe(event=b.get_syscall_fnname(syscall_name), fn_name=f"get_info_{syscall_name}")
     except:
         count += 1
-        print(f"{count}: {syscall_name}")
+        print(f"Unable to attach kprobe {count}: {syscall_name}")
         array.append(syscall_name)
         continue
     
@@ -746,9 +751,15 @@ with open(file_path, 'w') as file:
 # Open the perf buffer
 b["syscall_events"].open_perf_buffer(print_event)
 
+start_time = datetime.now()
 # Poll for events
 while True:
     try:
         b.perf_buffer_poll()
     except KeyboardInterrupt:
+        duration = (datetime.now() - start_time).total_seconds()
+        rate = requests/ duration
+        print(f"{requests} system calls triggered in {duration} seconds")
+        print(f"rate: {rate}")
+        print(f"my PID: {monitor_pid}")
         break
