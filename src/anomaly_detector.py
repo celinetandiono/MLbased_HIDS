@@ -47,6 +47,7 @@ while True:
         query = f'''
             SELECT *
     	    FROM "syscalls"
+
     	    WHERE time > '{last_timestamp}'
     	    GROUP BY "PID"
         '''

@@ -7,6 +7,7 @@ import json
 from kafka import KafkaProducer
 import os
 import time
+from elasticsearch_logger import ElasticsearchLogger
 
 # Global variables
 monitor_pid = os.getpid()
@@ -16,6 +17,13 @@ msg_buffer = []
 buffer_timestamp = None
 time_window = 15
 rate = 0
+filters = []
+
+# Initialize Elasticsearch logger
+elasticsearch_logger = ElasticsearchLogger(filename=os.path.basename(__file__))
+logger = elasticsearch_logger.get_logger()
+logger.info("Elastic logger set up")
+time.sleep(10)
 
 def get_path(name):
     relative_path = os.path.join(os.path.dirname(__file__), name)
@@ -23,7 +31,10 @@ def get_path(name):
     return absolute_path
 
 def get_ebpf_program(syscalls, syscalls_mapping, filters):
+    logger.info("Setting up ebpf program")
     filter_msg = ""
+    if filters:
+        filter_msg += "||"
     for filter in filters:
         if filter_msg:
             filter_msg += " || "
@@ -53,7 +64,7 @@ def get_ebpf_program(syscalls, syscalls_mapping, filters):
         struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	    data.ppid = task->real_parent->tgid;
         
-        if (data.pid == MONITOR_PID || data.pid == TERMINAL_PID || data.ppid == 1200 || {filter_msg}){{
+        if (data.pid == MONITOR_PID || data.pid == TERMINAL_PID || data.ppid == 1200 {filter_msg}){{
             return 0;
         }}
 
@@ -96,8 +107,9 @@ def send_msg_to_kafka():
 
 if __name__ == "__main__":
     args = initialize_parser()
-    filters = args.filters.split(",")
-    filters = [int(filter) for filter in filters]
+    if args.filters:
+        filters = args.filters.split(",")
+        filters = [int(filter) for filter in filters]
 
     with open(get_path("../data/train_syscalls_map.json"), 'r') as file:
         syscalls_mapping = json.load(file)
@@ -130,6 +142,7 @@ if __name__ == "__main__":
     failed = []
     for syscall_name in syscalls:
         try:
+            logger.info(f"Attaching tracepoint to sys_exit_{syscall_name}")
             b.attach_tracepoint(tp=f"syscalls:sys_exit_{syscall_name}", fn_name=f"get_info_{syscall_name}")
         except:
             count += 1
@@ -158,6 +171,7 @@ if __name__ == "__main__":
             time_diff = current_time - buffer_timestamp
             
             if time_diff >= time_window:
+                logger.info("Sending messages to kafka")
                 send_msg_to_kafka() 
                 avg = int(len(msg_buffer)/time_diff)
                 rate = int((rate + avg)/2) if rate else rate
@@ -171,3 +185,4 @@ if __name__ == "__main__":
             print(f"duration: {duration}")
             print(f"my PID: {monitor_pid}")
             break
+
