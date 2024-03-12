@@ -10,14 +10,14 @@ class ElasticsearchLogger:
         self.es = Elasticsearch([f'http://{uname}:{pwd}@localhost:9200'])
         self.filename = filename
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
         
         es_handler = self.ElasticsearchHandler(self.es, self.filename)  # Pass es to ElasticsearchHandler
-        es_handler.setLevel(logging.INFO)
-        
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        es_handler.setLevel(logging.DEBUG)
+      
+        formatter = logging.Formatter('%(asctime)s', datefmt='%Y-%m-%d %H:%M:%S')
         es_handler.setFormatter(formatter)
-        
+
         self.logger.addHandler(es_handler)
 
     class ElasticsearchHandler(logging.Handler):
@@ -28,7 +28,13 @@ class ElasticsearchLogger:
 
         def emit(self, record):
             log_entry = self.format(record)
-            self.es.index(index='syscall_logs', body={'message': log_entry, 'filename':self.filename})
+            log_body = {
+                'timestamp': log_entry,  # Store timestamp separately
+                'level': record.levelname,  # Store logging level separately
+                'message': record.getMessage(),  # Store log message separately
+                'filename': self.filename  # Optionally store filename
+            }
+            self.es.index(index='syscall_logs', body=log_body)
 
     def get_logger(self):
         return self.logger

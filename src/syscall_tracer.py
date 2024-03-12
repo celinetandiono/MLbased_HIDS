@@ -8,6 +8,7 @@ from kafka import KafkaProducer
 import os
 import time
 from elasticsearch_logger import ElasticsearchLogger
+import sys
 
 # Global variables
 monitor_pid = os.getpid()
@@ -22,8 +23,7 @@ filters = []
 # Initialize Elasticsearch logger
 elasticsearch_logger = ElasticsearchLogger(filename=os.path.basename(__file__))
 logger = elasticsearch_logger.get_logger()
-logger.info("Elastic logger set up")
-time.sleep(10)
+logger.info("Elasticsearch logger initialised")
 
 def get_path(name):
     relative_path = os.path.join(os.path.dirname(__file__), name)
@@ -31,14 +31,16 @@ def get_path(name):
     return absolute_path
 
 def get_ebpf_program(syscalls, syscalls_mapping, filters):
-    logger.info("Setting up ebpf program")
+    logger.info("Defining ebpf program text")
     filter_msg = ""
-    if filters:
-        filter_msg += "||"
+    
     for filter in filters:
         if filter_msg:
             filter_msg += " || "
         filter_msg += f"data.pid == {filter}"
+
+    if filters:
+        filter_msg = "|| " + filter_msg
 
     # Define eBPF program
     prog = f"""
@@ -51,7 +53,6 @@ def get_ebpf_program(syscalls, syscalls_mapping, filters):
         u32 pid;
         u32 syscall;
         char comm[TASK_COMM_LEN];
-        u32 ppid;
     }};
     
     BPF_PERF_OUTPUT(syscall_events);
@@ -61,10 +62,8 @@ def get_ebpf_program(syscalls, syscalls_mapping, filters):
 
         data.pid = bpf_get_current_pid_tgid() >> 32;
         
-        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-	    data.ppid = task->real_parent->tgid;
         
-        if (data.pid == MONITOR_PID || data.pid == TERMINAL_PID || data.ppid == 1200 {filter_msg}){{
+        if (data.pid == MONITOR_PID || data.pid == TERMINAL_PID {filter_msg}){{
             return 0;
         }}
 
@@ -75,7 +74,7 @@ def get_ebpf_program(syscalls, syscalls_mapping, filters):
         return 0;
     }}
     """
-
+    
     for syscall in syscalls:
         try:
             syscall_no = syscalls_mapping.get(syscall)
@@ -84,26 +83,39 @@ def get_ebpf_program(syscalls, syscalls_mapping, filters):
                 return submit_syscall_event(ctx, {syscall_no});
             }}"""
         except:
-            print(f"{syscall}: not found")
+            logging.warning(f"{syscall} not found in mapping")
     
     return prog
 
 def initialize_parser():
     parser = argparse.ArgumentParser(description="Intialize argument parser for systemcall_tracer.py")
     parser.add_argument("-f", "--filters", type=str, help="List of PIDs to filter/ not include. Format: <PID>,<PID>,<PID> (comma-seperated with no spaces)")
-
+    parser.add_argument("-l", "--loglevel",type=str, choices=["DEBUG","INFO","WARNING","ERROR","CRITICAL"],default="INFO",help="Log level to show in Kibana")
     return parser.parse_args()
-
+    
+def initialize_kafka_producer():
+    logger.info("Initializing Kafka Producer")
+    try:
+        producer = KafkaProducer(
+        	bootstrap_servers=['localhost:9092'],
+	        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+	        acks='all',  # Ensures maximum durability
+	        retries=5# Retry a few times in case of send failure
+        )
+        logger.info("Kafka Producer set up")
+        return producer
+    except Exception as e:
+        logger.error(f"Unable to initialize producer: {e}")
+        logger.info("Exiting program")
+        sys.exit(0)
     
 def send_msg_to_kafka():
     global msg_buffer
-    print(f"{len(msg_buffer)} messages in buffer")
     if msg_buffer:
         for msg in msg_buffer:
             producer.send('syscalls', value=msg)
         producer.flush()  # Ensure all buffered messages are sent
-        print("messages sent")
-        msg_buffer = []  # Clear the buffer after sending
+        msg_buffer.clear()  # Clear the buffer after sending
 
 if __name__ == "__main__":
     args = initialize_parser()
@@ -117,49 +129,33 @@ if __name__ == "__main__":
     with open(get_path("syscalls.txt")) as file:
         syscalls = file.read().split()
     
-    producer = KafkaProducer(
-	bootstrap_servers=['localhost:9092'],
-	value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-	acks='all',  # Ensures maximum durability
-	retries=5 # Retry a few times in case of send failure
-    )
-    
-    prog = get_ebpf_program(syscalls, syscalls_mapping, filters)
-   
+    producer = initialize_kafka_producer()
+
     #Initialize BPF
+    prog = get_ebpf_program(syscalls, syscalls_mapping, filters)
     b = BPF(text=prog)
   
     def process_event(cpu, data, size):
         global msg_buffer
         time_now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         event = b["syscall_events"].event(data)
-        msg = {"PID":event.pid, "syscall": event.syscall, "ppid":event.ppid,"timestamp":time_now}
-        print(msg)
+        msg = {"PID":event.pid, "syscall": event.syscall,"timestamp":time_now}
         msg_buffer.append(msg)
         
     # Attach the BPF program to the sys_exit tracepoint (for a specific syscall)
-    count = 0
-    failed = []
     for syscall_name in syscalls:
         try:
             logger.info(f"Attaching tracepoint to sys_exit_{syscall_name}")
             b.attach_tracepoint(tp=f"syscalls:sys_exit_{syscall_name}", fn_name=f"get_info_{syscall_name}")
         except:
-            count += 1
-            print(f"Unable to attach tracepoint {count}: {syscall_name}")
-            failed.append(syscall_name)
-            continue
-
-    if failed:    
-        file_path = get_path("unable.txt")
-        with open(file_path, 'w') as file:
-            file.write('\n'.join(map(str, failed)))
+            logger.warning(f"Unable to attach tracepoint {syscall_name}")
 
     # Open the perf buffer
     b["syscall_events"].open_perf_buffer(process_event)
 
     start_time = datetime.now()
     # Poll for events
+    logger.info("Polling events - details can be found in grafana/influxdb")
     while True:
         try:
             current_time = time.time()
@@ -167,22 +163,22 @@ if __name__ == "__main__":
             
             if buffer_timestamp is None:
                 buffer_timestamp = current_time
-        	
-            time_diff = current_time - buffer_timestamp
             
-            if time_diff >= time_window:
-                logger.info("Sending messages to kafka")
+            elapsed_time = current_time - buffer_timestamp
+            if elapsed_time >= time_window:
                 send_msg_to_kafka() 
-                avg = int(len(msg_buffer)/time_diff)
+                avg = int(len(msg_buffer)/elapsed_time)
                 rate = int((rate + avg)/2) if rate else rate
                 buffer_timestamp = None
             
-        except KeyboardInterrupt:
-            duration = (datetime.now() - start_time).total_seconds()
+        except Exception as e:
+            logger.error(f"Error occured - {e}")
+            duration = (current_time - start_time).total_seconds()
             if not rate:
                 rate = int(len(msg_buffer)/duration)
-            print(f"rate: {rate}")
+            logger.info(f"rate: {rate} system calls triggered per second")
             print(f"duration: {duration}")
             print(f"my PID: {monitor_pid}")
+            logger.info("Exiting")
             break
 
