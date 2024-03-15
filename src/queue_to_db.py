@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 import argparse
 import mysql.connector
+from alerting import generate_alert
 
 # global variables
 msg_buffer = []
@@ -27,9 +28,10 @@ logger.info("Elasticsearch logger initialised")
 def initialize_kafka_consumer():
     logger.info("Initializing Kafka Producer")
     try:
+        kafka_server = os.getenv("KAFKA_SERVER")
         consumer = KafkaConsumer(
             'syscalls',  
-            bootstrap_servers='localhost:9092', 
+            bootstrap_servers=kafka_server, 
             auto_offset_reset='earliest',  # Start reading from the earliest message if no offset is stored
             group_id='aglclt',
             enable_auto_commit=False,  # Enable automatic offset commit
@@ -83,14 +85,17 @@ if __name__ == "__main__":
             current_time = time.time()
             if buffer_timestamp is None: 
                 buffer_timestamp = current_time
-
+    
             data = message.value
+            print(data)
+            if len(data) == 3:
+                continue
             timestamp = datetime.strptime(data["timestamp"], "%d/%m/%Y %H:%M:%S")
             syscall = data["syscall"]
-            
+             
             # Prepare SQL statement
-            sql = "INSERT INTO syscalls (timestamp, syscall_no, syscall, pid) VALUES (%s, %s, %s, %s)"
-            values = (timestamp, syscall, reverse_mapping.get(syscall),data["PID"])
+            sql = "INSERT INTO syscalls (timestamp, syscall_no, syscall, pid, comm) VALUES (%s, %s, %s, %s, %s)"
+            values = (timestamp,syscall,reverse_mapping.get(syscall),data["PID"],data["command"])
             msg_buffer.append(values)
 
             elapsed_time = current_time - buffer_timestamp
@@ -105,9 +110,14 @@ if __name__ == "__main__":
             consumer.commit()
     
         except Exception as e:
-            logger.error(f"An error occurred: {e}")
+            error_msg = f"An exception occurred - {e}. \n Please investigate"
+            logger.error(error_msg)
+            subject = "NODE UNAVAILABLE - [Database writer down]"
+            generate_alert(subject, error_msg)
             consumer.close()
-            client.close()
+            
+            mysql_cursor.close()
+            mysql_connection.close()
             sys.exit(1)
 
 

@@ -20,8 +20,11 @@ import os
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
+import json
 
-syscall_mapping = get_syscalls_mapping()
+with open(get_path("../utils/train_syscalls_map.json")) as file:
+    syscall_mapping = json.load(file)
+
 def encode(syscall):
     return syscall_mapping[syscall]
 
@@ -94,6 +97,7 @@ def get_data(dataset="adfa", batch_size=64):
     train, val, test_val, atk = load_data_splits(attack_sequences, normal_sequences) 
 
     def add_train_labels(x):
+        print(x)
         result = x[:-1], x[1:]
         return result
 
@@ -120,4 +124,4 @@ def get_data(dataset="adfa", batch_size=64):
     )
 
 if __name__ == "__main__":
-    train, cal, tests = get_data()
+    train, cal, tests = get_data("merged")

@@ -16,7 +16,7 @@ def data_analysis(dataset = "ADFA-LD"):
     """ Gets the unique system calls given a dataset
     """
     syscall_set = set()
-    folder_path = Path(get_path(f"{dataset}"))
+    folder_path = Path(get_path(f"../data/{dataset}"))
 
     if not Path(folder_path).exists():
         with tarfile.open(get_path(f"../data/{dataset}.tar.xz")) as f:
@@ -51,7 +51,7 @@ def get_training_map(syscalls):
         training_map[i] = idx
         idx += 1
 
-    file_path = get_path("../data/train_syscalls_map.json")
+    file_path = get_path("../utils/train_syscalls_map.json")
     with open(file_path, 'w') as file:
         json.dump(training_map, file)
     print(f"Set contents have been written to {file_path}")
@@ -143,15 +143,17 @@ if __name__ == "__main__":
     print(f"Total unique syscalls: {len(merge)}")
     merge = sorted(merge)
 
-    with open(get_path("syscalls_to_attach.txt"), 'w') as file:
-        file.write(str(merge))
+    get_training_map(merge)
+
+    #with open(get_path("syscalls_to_attach.txt"), 'w') as file:
+     #   file.write(str(merge))
     
-    datasets = {"attack": ["ADFA_decoded/Attack_Data_Master", "PLAID/PlAID/attack"], 
-                "normal": ["ADFA_decoded/Training_Data_Master", "ADFA_decoded/Validation_Data_Master", "PLAID/PLAID/baseline"]}
+    #datasets = {"attack": ["ADFA_decoded/Attack_Data_Master", "PLAID/PlAID/attack"], 
+     #           "normal": ["ADFA_decoded/Training_Data_Master", "ADFA_decoded/Validation_Data_Master", "PLAID/PLAID/baseline"]}
 
-    for dataset in datasets:
-        syscall_occurence_analysis(dataset, datasets[dataset])
+    #for dataset in datasets:
+     #   syscall_occurence_analysis(dataset, datasets[dataset])
 
-    map_syscall_to_occ()
-    check_exit_exists()
+    #map_syscall_to_occ()
+    #check_exit_exists()
     

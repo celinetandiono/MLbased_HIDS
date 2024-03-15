@@ -1,4 +1,4 @@
-#/usr/bin/python3
+#!/usr/bin/python3
 
 import sys
 import os
@@ -14,6 +14,7 @@ from kafka import KafkaProducer
 import json
 import logging
 import time
+from alerting import generate_alert
 
 # Global variables
 monitor_pid = os.getpid()
@@ -34,6 +35,7 @@ logger.info("Elasticsearch logger initialised")
 def initialize_kafka_producer():
     logger.info("Initializing Kafka Producer")
     try:
+        kafka_server = os.getenv("KAFKA_SERVER")
         producer = KafkaProducer(
             bootstrap_servers=['localhost:9092'],
             value_serializer=lambda v: json.dumps(v).encode('utf-8'),
@@ -145,8 +147,7 @@ if __name__ == "__main__":
         global msg_buffer
         time_now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         event = b["syscall_events"].event(data)
-        msg = {"PID":event.pid, "syscall": event.syscall,"timestamp":time_now}
-        print(msg)
+        msg = {"PID":event.pid, "syscall":event.syscall,"command":event.comm.decode(), "timestamp":time_now}
         msg_buffer.append(msg)
         
     # Attach the BPF program to the sys_exit tracepoint (for a specific syscall)
@@ -179,7 +180,11 @@ if __name__ == "__main__":
                 buffer_timestamp = None
             
         except Exception as e:
-            logger.error(f"Error occured - {e}")
+            error_msg = f"Exception occurred - {e}. Please investigate.")
+            logger.error(error_msg)
+            subject = "NODE UNAVAILABLE - [system call tracer down]"
+            generate_alert(subject, error_msg)
+
             duration = (current_time - start_time).total_seconds()
             if not rate:
                 rate = int(len(msg_buffer)/duration)
