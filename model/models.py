@@ -120,7 +120,7 @@ def create_lstm_autoencoder(hp=None, vocab_size=176, depth=2, cells=200, dropout
     final_model.summary()
     return final_model
 
-def train(dataset, batch_size=32, model_type="lstm", epochs=10):
+def train(dataset, batch_size=16, model_type="lstm", epochs=10):
     vocab_size = 235
 
     if model_type == "lstm":
@@ -150,7 +150,7 @@ def train(dataset, batch_size=32, model_type="lstm", epochs=10):
             shuffle=True
         )
 
-        model_path = Path(get_path(f"model_{model}_{idx}.ckpt"))
+        model_path = Path(get_path(f"model_{model_type}_{idx}.ckpt"))
         model.save(model_path)
 
         # Evaluate the model on the test data

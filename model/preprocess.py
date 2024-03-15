@@ -92,7 +92,7 @@ def load_data_splits(attack_sequences, normal_sequences):
     val = tf.data.Dataset.from_tensor_slices(tf.ragged.constant(val))
     return train, val, test_val, atk
 
-def get_data(dataset="adfa", batch_size=64):
+def get_data(dataset="adfa", batch_size=32):
     attack_sequences, normal_sequences = get_training_data(dataset)
     train, val, test_val, atk = load_data_splits(attack_sequences, normal_sequences) 
 

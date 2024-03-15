@@ -180,7 +180,7 @@ if __name__ == "__main__":
                 buffer_timestamp = None
             
         except Exception as e:
-            error_msg = f"Exception occurred - {e}. Please investigate.")
+            error_msg = f"Exception occurred - {e}. Please investigate."
             logger.error(error_msg)
             subject = "NODE UNAVAILABLE - [system call tracer down]"
             generate_alert(subject, error_msg)
